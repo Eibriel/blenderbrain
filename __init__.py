@@ -20,25 +20,64 @@ import bpy
 import json
 import asyncio
 import requests
+import importlib
 import blender_id
+import blenderbrain.brain
 
 from bpy.props import StringProperty
+from bpy.app.handlers import persistent
 
 bl_info = {
     "name": "BlenderBrain",
     "author": "Eibriel",
     "version": (0, 0),
-    "blender": (2, 78, 0),
-    "location": "View3D > Info Header",
-    "description": "Artificial Intelligence for Blender",
+    "blender": (2, 79, 0),
+    "location": "Text Editor > BlenderBrain text",
+    "description": "Blender Assistant",
     "warning": "",
     "wiki_url": "https://github.com/Eibriel/BlenderBrain/wiki",
     "tracker_url": "https://github.com/Eibriel/BlenderBrain/issues",
     "category": "Eibriel"}
 
 
+# importlib.reload(blenderbrain.commands)
+
+# TODO
+# Traceback (most recent call last):
+#   File "addons/blenderbrain/__init__.py", line 57, in load_handler
+#     if not (last_line == "" and last_last_line[0] != "#"):
+# IndexError: string index out of range
+
+@persistent
+def load_handler(dummy):
+    D = bpy.data
+    if 'BlenderBrain' not in D.texts:
+        return
+    text = D.texts['BlenderBrain']
+    if len(text.lines) > 1:
+        last_last_line = text.lines[-2].body
+    else:
+        last_last_line = "#"
+    last_line = text.lines[-1].body
+    if not (last_line == "" and last_last_line[0] != "#"):
+        return
+    # Mark as processing
+    text.from_string("{}#".format(text.as_string()))
+    br = blenderbrain.brain.brain()
+    br.load()
+    question = last_last_line
+    if question.startswith("- "):
+        question = question[2:]
+    answers = br.process(question)
+    answer_text = "\n# ".join(answers)
+    answer_text = "# {}".format(answer_text)
+    new_text = "{}{}\n- ".format(text.as_string(), answer_text)
+
+    text.from_string(new_text)
+
+
 class blenderbrainCommand (bpy.types.Operator):
-    """Send command to BlenderBrain"""
+    """Excecute BlenderBrain Command"""
     bl_idname = "blenderbrain.command"
     bl_label = "BlenderBrain"
     bl_options = {"REGISTER", "UNDO"}
@@ -52,57 +91,24 @@ class blenderbrainCommand (bpy.types.Operator):
 
     def execute(self, context):
         scn = context.scene
+        bpy.ops.object.select_all(action='DESELECT')
         return {'FINISHED'}
 
 
-def input_update_loop(self, loop, context):
+def blenderbrain_button(self, context):
     wm = bpy.context.window_manager
-    if not blender_id.is_logged_in():
-        wm.blenderbrain_response = "First you need to login with Blender ID"
-        return
-
-    username = blender_id.get_active_profile().username
-    username_name = username.split("@")[0]
-
-    headers = {'user-agent': 'rDany', 'Content-Type': 'application/json'}
-    post_data = {
-        'question': wm.blenderbrain_input,
-        'username': username
-    }
-    r = requests.post("http://0.0.0.0:5000/blenderbrain_api", data=json.dumps(post_data), headers=headers)
-    # print (r.text)
-    r_json = r.json()
-    wm.blenderbrain_response = r_json["output"]["text"][0]
-    loop.stop()
-
-
-def on_input_update(self, context):
-    loop = asyncio.get_event_loop()
-
-    # Schedule a call to hello_world()
-    loop.call_soon(input_update_loop, self, loop, context)
-
-    # Blocking call interrupted by loop.stop()
-    loop.run_forever()
-    loop.close()
-
-
-def blenderbrain_input(self, context):
-    wm = bpy.context.window_manager
-    self.layout.prop(wm, "blenderbrain_input", text="", icon="SPACE2")
-    self.layout.label(text=wm.blenderbrain_response)
+    self.layout.operator("blenderbrain.command")
 
 
 def register():
-    bpy.types.WindowManager.blenderbrain_input = StringProperty(name="BlenderBrain input", description="Input field for BlenderBrain", default="", options={'HIDDEN', 'SKIP_SAVE'}, update=on_input_update)
-    bpy.types.WindowManager.blenderbrain_response = StringProperty(name="BlenderBrain response", description="Response from BlenderBrain", default="", options={'HIDDEN', 'SKIP_SAVE'})
-
-    bpy.types.INFO_HT_header.prepend(blenderbrain_input)
+    bpy.app.handlers.scene_update_post.append(load_handler)
+    bpy.types.INFO_HT_header.prepend(blenderbrain_button)
     bpy.utils.register_module(__name__)
 
 
 def unregister():
-    bpy.types.INFO_HT_header.remove(blenderbrain_input)
+    bpy.app.handlers.scene_update_post.remove(load_handler)
+    bpy.types.INFO_HT_header.remove(blenderbrain_button)
     bpy.utils.unregister_module(__name__)
 
 
